@@ -1,0 +1,671 @@
+{
+  "updatedAt": "2026-08-19T07:59:51.242Z",
+  "createdAt": "2026-08-02T13:12:12.148Z",
+  "id": "chSXWYSK2S2unLgz",
+  "name": "LINE 一句話記帳 × Notion",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 一句話記帳設定\n\n1. LINE 回覆節點選擇 Header Auth credential：\n   - Header Name：Authorization\n   - Header Value：Bearer <LINE Channel Access Token>\n2. Notion 節點選擇正式 Notion credential。\n3. Notion DB 必須分享給 Integration。\n4. 啟用後，把 LINE Developers Webhook URL 改成：\n   https://XXXXX/webhook/line-accounting-submit\n5. 測試：記帳 昨天中油1350玉山卡\nNotion模板簡易分享:\nhttps://andesnice.notion.site/3bd8db83bd938041a9cfcb7105c0daff?source=copy_link\n此流程不讀取 Notion 歷史資料，只有確認後新增一筆。",
+        "height": 420,
+        "width": 520
+      },
+      "id": "9ccacba7-ecdf-43de-b779-39552e2cd5d6",
+      "name": "匯入後設定說明",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "line-accounting-submit",
+        "options": {
+          "noResponseBody": true
+        }
+      },
+      "id": "52169314-54e6-4d4d-9817-cc29df1b39cc",
+      "name": "LINE 一句話記帳 Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        32,
+        432
+      ],
+      "webhookId": "1ca1ed50-a001-4ea1-8101-000000000102"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst events = Array.isArray(body.events) ? body.events : [];\n\nreturn events\n  .filter(event => event?.type === 'message' && event?.message?.type === 'text')\n  .map(event => ({\n    json: {\n      userId: event.source?.userId || '',\n      replyToken: event.replyToken || '',\n      message: String(event.message.text || '').normalize('NFKC').trim(),\n      webhookEventId: event.webhookEventId || '',\n      isRedelivery: Boolean(event.deliveryContext?.isRedelivery),\n    },\n    pairedItem: { item: 0 },\n  }));"
+      },
+      "id": "1f6bfc26-f5ed-480f-959c-1b0fe5793fc2",
+      "name": "解析 LINE 事件",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        256,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst store = staticData.oneLineAccounting ||= { pending: {}, lastPayment: {} };\nconst TTL_MS = 10 * 60 * 1000;\nconst now = Date.now();\n\nfor (const [key, value] of Object.entries(store.pending)) {\n  if (!value?.updatedAt || now - value.updatedAt > TTL_MS) delete store.pending[key];\n}\n\nconst categories = [\n  '食物', '服飾', '日常用品', '交通', '稅收', '手機費', '油錢', '停車費',\n  '休閒', '宮廟', '醫療', '玉山存錢', '卡費', '暫付', '罰單', '車',\n  '工具', '投資', '酒煙', '房貸', '訂閱',\n];\n\nconst payments = [\n  '現金', '街口支付', '富邦轉帳', 'Line', '玉山刷卡', '富邦付款',\n  '遠傳扣款', '台灣銀行扣款',\n];\n\nconst categoryGroups = {\n  '飲食': ['食物', '酒煙'],\n  '生活': ['服飾', '日常用品'],\n  '交通': ['交通', '油錢', '停車費', '罰單', '車'],\n  '帳單': ['稅收', '手機費', '卡費', '房貸', '訂閱'],\n  '健康': ['醫療'],\n  '休閒': ['休閒', '宮廟'],\n  '財務': ['玉山存錢', '暫付', '投資'],\n  '其他': ['工具'],\n};\n\nconst categoryKeywords = {\n  '食物': ['早餐', '午餐', '晚餐', '宵夜', '便當', '餐廳', '飲料', '咖啡', '吃飯', '食物'],\n  '服飾': ['衣服', '褲子', '鞋子', '服飾'],\n  '日常用品': ['日用品', '生活用品', '衛生紙', '洗衣精', '清潔用品', '日常用品'],\n  '交通': ['公車', '捷運', '火車', '高鐵', '計程車', 'uber', '交通'],\n  '稅收': ['繳稅', '稅金', '稅收'],\n  '手機費': ['手機費', '電話費', '電信費'],\n  '油錢': ['加油', '中油', '台塑', '油錢'],\n  '停車費': ['停車場', '停車費', '停車'],\n  '休閒': ['電影', '遊戲', '唱歌', '旅遊', '休閒'],\n  '宮廟': ['香油錢', '宮廟', '廟'],\n  '醫療': ['看醫生', '診所', '醫院', '藥局', '醫療'],\n  '玉山存錢': ['玉山存錢'],\n  '卡費': ['信用卡費', '繳卡費', '卡費'],\n  '暫付': ['代墊', '暫付'],\n  '罰單': ['罰單'],\n  '車': ['保養', '維修', '驗車', '洗車', '車'],\n  '工具': ['工具'],\n  '投資': ['股票', '基金', '投資'],\n  '酒煙': ['啤酒', '酒', '香煙', '煙'],\n  '房貸': ['房貸'],\n  '訂閱': ['netflix', 'spotify', 'youtube premium', '訂閱'],\n};\n\nconst paymentAliases = [\n  ['台灣銀行扣款', '台灣銀行扣款'], ['台銀扣款', '台灣銀行扣款'],\n  ['遠傳扣款', '遠傳扣款'], ['富邦轉帳', '富邦轉帳'], ['富邦付款', '富邦付款'],\n  ['玉山刷卡', '玉山刷卡'], ['玉山卡', '玉山刷卡'], ['刷玉山', '玉山刷卡'],\n  ['街口支付', '街口支付'], ['街口', '街口支付'],\n  ['line pay', 'Line'], ['linepay', 'Line'], ['line', 'Line'],\n  ['現金', '現金'], ['付現', '現金'],\n].sort((a, b) => b[0].length - a[0].length);\n\nfunction quickReply(text, actions = []) {\n  const message = { type: 'text', text };\n  if (actions.length) {\n    message.quickReply = {\n      items: actions.slice(0, 13).map(([label, value]) => ({\n        type: 'action',\n        action: { type: 'message', label, text: value },\n      })),\n    };\n  }\n  return [message];\n}\n\nfunction reply(base, text, actions = []) {\n  return { ...base, action: 'reply', messages: quickReply(text, actions) };\n}\n\nfunction twParts() {\n  const parts = new Intl.DateTimeFormat('en-US', {\n    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',\n  }).formatToParts(new Date());\n  return Object.fromEntries(parts.map(part => [part.type, part.value]));\n}\n\nfunction formatIso(year, month, day) {\n  const date = new Date(Date.UTC(year, month - 1, day));\n  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;\n  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;\n}\n\nfunction twDate(offset = 0) {\n  const parts = twParts();\n  const date = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + offset));\n  return date.toISOString().slice(0, 10);\n}\n\nfunction parseDate(text) {\n  let remaining = text;\n  let match = remaining.match(/\\b(20\\d{2})[-\\/.](\\d{1,2})[-\\/.](\\d{1,2})\\b/);\n  if (match) {\n    const date = formatIso(Number(match[1]), Number(match[2]), Number(match[3]));\n    if (date) return { date, remaining: remaining.replace(match[0], ' ') };\n  }\n\n  match = remaining.match(/(?:^|\\s)(\\d{1,2})[\\/.](\\d{1,2})(?:\\s|$)/);\n  if (!match) match = remaining.match(/(\\d{1,2})月(\\d{1,2})日/);\n  if (match) {\n    const year = Number(twParts().year);\n    const date = formatIso(year, Number(match[1]), Number(match[2]));\n    if (date) return { date, remaining: remaining.replace(match[0], ' ') };\n  }\n\n  for (const [word, offset] of [['前天', -2], ['昨天', -1], ['今天', 0]]) {\n    if (remaining.includes(word)) return { date: twDate(offset), remaining: remaining.replace(word, ' ') };\n  }\n  return { date: twDate(0), remaining };\n}\n\nfunction removeAt(text, index, length) {\n  return `${text.slice(0, index)} ${text.slice(index + length)}`;\n}\n\nfunction parsePayment(text) {\n  const lower = text.toLowerCase();\n  for (const [alias, payment] of paymentAliases) {\n    const index = lower.indexOf(alias.toLowerCase());\n    if (index >= 0) return { payment, remaining: removeAt(text, index, alias.length) };\n  }\n  return { payment: '', remaining: text };\n}\n\nfunction evaluateAmount(expression) {\n  const clean = expression.replace(/,/g, '').replace(/\\s/g, '');\n  if (!/^\\d+(?:\\.\\d+)?(?:[+-]\\d+(?:\\.\\d+)?)*$/.test(clean)) return null;\n  const tokens = clean.match(/[+-]?\\d+(?:\\.\\d+)?/g) || [];\n  const amount = tokens.reduce((sum, token) => sum + Number(token), 0);\n  return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : null;\n}\n\nfunction parseAmount(text) {\n  if (/\\d\\s*[+-]\\s*[+-]\\s*\\d/.test(text)) return { amount: null, remaining: text, invalid: true };\n  const matches = [...text.matchAll(/\\d[\\d,]*(?:\\.\\d+)?(?:\\s*[+-]\\s*\\d[\\d,]*(?:\\.\\d+)?)*/g)];\n  for (let index = matches.length - 1; index >= 0; index -= 1) {\n    const match = matches[index];\n    const amount = evaluateAmount(match[0]);\n    if (amount !== null) {\n      return { amount, remaining: removeAt(text, match.index, match[0].length), invalid: false };\n    }\n  }\n  return { amount: null, remaining: text, invalid: false };\n}\n\nfunction detectCategory(text) {\n  const lower = text.toLowerCase();\n  const candidates = [];\n  for (const [category, keywords] of Object.entries(categoryKeywords)) {\n    for (const keyword of keywords) candidates.push([keyword.toLowerCase(), category]);\n  }\n  candidates.sort((a, b) => b[0].length - a[0].length);\n  const found = candidates.find(([keyword]) => lower.includes(keyword));\n  return found?.[1] || '';\n}\n\nfunction categoryPrompt(base, pending, intro = '請選擇分類群組：') {\n  pending.waiting = 'category';\n  pending.updatedAt = Date.now();\n  store.pending[base.userId] = pending;\n  const actions = Object.keys(categoryGroups).map(group => [group, `分類群組:${group}`]);\n  actions.push(['❌ 取消', '取消記帳']);\n  return reply(base, intro, actions);\n}\n\nfunction paymentPrompt(base, pending, intro = '請選擇付款方式：') {\n  pending.waiting = 'payment';\n  pending.updatedAt = Date.now();\n  store.pending[base.userId] = pending;\n  const actions = payments.map(payment => [payment, `付款:${payment}`]);\n  actions.push(['❌ 取消', '取消記帳']);\n  return reply(base, intro, actions);\n}\n\nfunction amountPrompt(base, pending, intro = '請輸入金額，例如：120 或 100+50') {\n  pending.waiting = 'amount';\n  pending.updatedAt = Date.now();\n  store.pending[base.userId] = pending;\n  return reply(base, intro, [['❌ 取消', '取消記帳']]);\n}\n\nfunction confirmPrompt(base, pending) {\n  pending.waiting = 'confirm';\n  pending.updatedAt = Date.now();\n  store.pending[base.userId] = pending;\n  const amount = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 }).format(pending.amount);\n  const text = [\n    '📝 請確認記帳', '',\n    `📅 日期：${pending.date}`,\n    `📂 分類：${pending.category}`,\n    `💰 金額：NT$${amount}`,\n    `💳 付款：${pending.payment}`,\n    `✏️ 備註：${pending.note || '（無）'}`,\n  ].join('\\n');\n  return reply(base, text, [\n    ['✅ 確認', '確認記帳'], ['📂 改分類', '修改分類'], ['💰 改金額', '修改金額'],\n    ['💳 改付款', '修改付款'], ['❌ 取消', '取消記帳'],\n  ]);\n}\n\nfunction nextStep(base, pending) {\n  if (!pending.amount) return amountPrompt(base, pending);\n  if (!pending.category) return categoryPrompt(base, pending);\n  if (!pending.payment) return paymentPrompt(base, pending);\n  return confirmPrompt(base, pending);\n}\n\nfunction handle(input) {\n  const base = {\n    userId: input.userId || '',\n    replyToken: input.replyToken || '',\n    webhookEventId: input.webhookEventId || '',\n  };\n  const message = String(input.message || '').trim();\n  if (!base.userId || !base.replyToken || !message) return null;\n\n  let pending = store.pending[base.userId];\n\n  if (message === '取消記帳') {\n    delete store.pending[base.userId];\n    return reply(base, '已取消這筆記帳。');\n  }\n\n  if (message === '記帳' || message === '記帳說明') {\n    return reply(base, [\n      '請在「記帳」後輸入一整句，例如：',\n      '• 記帳 午餐120現金',\n      '• 記帳 昨天中油1350玉山卡',\n      '• 記帳 8/1 停車60 line',\n      '',\n      '日期可省略；付款方式省略時會沿用上次成功記帳的方式。',\n    ].join('\\n'));\n  }\n\n  if (message === '確認記帳') {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    if (pending.saving) return reply(base, '這筆資料正在寫入，請稍候，不需要重複確認。');\n    if (!pending.amount || !pending.category || !pending.payment) return nextStep(base, pending);\n    pending.saving = true;\n    pending.updatedAt = Date.now();\n    store.pending[base.userId] = pending;\n    return {\n      ...base,\n      action: 'save',\n      title: String(pending.note || pending.category).slice(0, 100),\n      note: String(pending.note || '').slice(0, 100),\n      category: pending.category,\n      amount: pending.amount,\n      payment: pending.payment,\n      date: pending.date,\n    };\n  }\n\n  if (message.startsWith('分類群組:')) {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    const group = message.slice('分類群組:'.length).trim();\n    const options = categoryGroups[group];\n    if (!options) return categoryPrompt(base, pending, '找不到這個群組，請重新選擇：');\n    const actions = options.map(category => [category, `類別:${category}`]);\n    actions.push(['❌ 取消', '取消記帳']);\n    return reply(base, `請選擇「${group}」的細分類：`, actions);\n  }\n\n  if (message.startsWith('類別:')) {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    const category = message.slice('類別:'.length).trim();\n    if (!categories.includes(category)) return categoryPrompt(base, pending, '分類不在允許清單，請重新選擇：');\n    pending.category = category;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\n  if (message.startsWith('付款:')) {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    const payment = message.slice('付款:'.length).trim();\n    if (!payments.includes(payment)) return paymentPrompt(base, pending, '付款方式不在允許清單，請重新選擇：');\n    pending.payment = payment;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\n  if (message === '修改分類') {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    return categoryPrompt(base, pending);\n  }\n  if (message === '修改付款') {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    return paymentPrompt(base, pending);\n  }\n  if (message === '修改金額') {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    return amountPrompt(base, pending);\n  }\n\n  if (pending?.waiting === 'amount') {\n    const parsed = parseAmount(message);\n    if (!parsed.amount || parsed.invalid) return amountPrompt(base, pending, '金額格式不正確，請輸入例如：120 或 100+50');\n    pending.amount = parsed.amount;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\n  if (pending?.waiting === 'category') {\n    const category = categories.includes(message) ? message : detectCategory(message);\n    if (!category) return categoryPrompt(base, pending, '無法辨識分類，請從群組選擇：');\n    pending.category = category;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\n  if (pending?.waiting === 'payment') {\n    const parsed = parsePayment(message);\n    if (!parsed.payment) return paymentPrompt(base, pending, '無法辨識付款方式，請重新選擇：');\n    pending.payment = parsed.payment;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\nconst content = message.startsWith('記帳')\n  ? message.slice(2).replace(/^[\\s:：]+/, '').trim()\n  : message;\n  if (!content) return reply(base, '請輸入完整內容，例如：記帳 午餐120現金');\n\n  const parsedDate = parseDate(content);\n  const parsedPayment = parsePayment(parsedDate.remaining);\n  const parsedAmount = parseAmount(parsedPayment.remaining);\n  const category = detectCategory(parsedAmount.remaining);\n  const note = parsedAmount.remaining\n    .replace(/[，,；;|]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, 100);\n\n  pending = {\n    date: parsedDate.date,\n    category,\n    amount: parsedAmount.amount,\n    payment: parsedPayment.payment || store.lastPayment[base.userId] || '',\n    note,\n    updatedAt: Date.now(),\n    waiting: '',\n    saving: false,\n  };\n  store.pending[base.userId] = pending;\n\n  if (parsedAmount.invalid) return amountPrompt(base, pending, '金額格式不正確，請輸入例如：120 或 100+50');\n  return nextStep(base, pending);\n}\n\nconst output = [];\nfor (const [index, item] of $input.all().entries()) {\n  const result = handle(item.json);\n  if (result) output.push({ json: result, pairedItem: { item: index } });\n}\nreturn output;"
+      },
+      "id": "eaac949a-4a06-4514-be22-b2980db0a2da",
+      "name": "解析一句話與狀態",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1ca1ed50-a001-4ea1-8101-000000000201",
+              "leftValue": "={{ $json.action }}",
+              "rightValue": "save",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1b87f6a-a0bd-4108-adb8-3e4782c88f75",
+      "name": "是否確認寫入",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        752,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "dbe28d3510e049428ae29c62045a9769",
+          "mode": "id"
+        },
+        "title": "={{ $json.title }}",
+        "simple": false,
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "支出類型|select",
+              "selectValue": "={{ $json.category }}"
+            },
+            {
+              "key": "金額|number",
+              "numberValue": "={{ $json.amount }}"
+            },
+            {
+              "key": "Date|date",
+              "includeTime": false,
+              "date": "={{ $json.date }}",
+              "timezone": "Asia/Taipei"
+            },
+            {
+              "key": "付款方式|select",
+              "selectValue": "={{ $json.payment }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f0b85d5a-669c-41f2-9f5d-67668a58732f",
+      "name": "新增 Notion 帳目",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [
+        1024,
+        304
+      ],
+      "credentials": {
+        "notionApi": {
+          "id": "GQXAagfHT864gK5q",
+          "name": "Notion account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const original = $('解析一句話與狀態').item.json;\nconst staticData = $getWorkflowStaticData('global');\nconst store = staticData.oneLineAccounting ||= { pending: {}, lastPayment: {} };\ndelete store.pending[original.userId];\nstore.lastPayment[original.userId] = original.payment;\n\nconst amount = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 }).format(original.amount);\nconst text = [\n  '✅ 記帳成功！', '',\n  `📅 ${original.date}`,\n  `📂 ${original.category}`,\n  `💰 NT$${amount}`,\n  `💳 ${original.payment}`,\n  `✏️ ${original.note || '（無備註）'}`,\n].join('\\n');\n\nreturn {\n  json: {\n    replyToken: original.replyToken,\n    messages: [{ type: 'text', text }],\n  },\n};"
+      },
+      "id": "ed9d3acf-7e61-4667-9bcf-df67bc235709",
+      "name": "清除待確認並組成功訊息",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const original = $('解析一句話與狀態').item.json;\nconst staticData = $getWorkflowStaticData('global');\nconst store = staticData.oneLineAccounting ||= { pending: {}, lastPayment: {} };\nif (store.pending[original.userId]) {\n  store.pending[original.userId].saving = false;\n  store.pending[original.userId].updatedAt = Date.now();\n}\nreturn {\n  json: {\n    replyToken: original.replyToken,\n    messages: [{\n      type: 'text',\n      text: '⚠️ Notion 寫入失敗，待確認資料仍保留。請稍後按「重試」或取消。',\n      quickReply: {\n        items: [\n          { type: 'action', action: { type: 'message', label: '🔄 重試', text: '確認記帳' } },\n          { type: 'action', action: { type: 'message', label: '❌ 取消', text: '取消記帳' } },\n        ],\n      },\n    }],\n  },\n};"
+      },
+      "id": "f3d14bff-3751-4668-a4b0-444d4e577807",
+      "name": "組 Notion 失敗訊息",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "lineMessagingApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { replyToken: $json.replyToken, messages: $json.messages } }}",
+        "options": {}
+      },
+      "id": "d20dd919-96b6-4f7c-aa10-810ccf66b5a5",
+      "name": "LINE 回覆",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1584,
+        464
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CnK2jCKERJJzgbyX",
+          "name": "Header Auth account"
+        },
+        "lineMessagingApi": {
+          "id": "ZyrigrYz6Z53vas8",
+          "name": "GAS社畜崙"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "LINE 一句話記帳 Webhook": {
+      "main": [
+        [
+          {
+            "node": "解析 LINE 事件",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析 LINE 事件": {
+      "main": [
+        [
+          {
+            "node": "解析一句話與狀態",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析一句話與狀態": {
+      "main": [
+        [
+          {
+            "node": "是否確認寫入",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "是否確認寫入": {
+      "main": [
+        [
+          {
+            "node": "新增 Notion 帳目",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LINE 回覆",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "新增 Notion 帳目": {
+      "main": [
+        [
+          {
+            "node": "清除待確認並組成功訊息",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "組 Notion 失敗訊息",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "清除待確認並組成功訊息": {
+      "main": [
+        [
+          {
+            "node": "LINE 回覆",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "組 Notion 失敗訊息": {
+      "main": [
+        [
+          {
+            "node": "LINE 回覆",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LINE 回覆": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "global": {
+      "oneLineAccounting": {
+        "pending": {},
+        "lastPayment": {
+          "Ue5af5ffe86f5b0ec30f38c7dfaf4e8f9": "Line"
+        }
+      }
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "1cffbbb1-625e-4448-a417-b32945e83ea0",
+  "activeVersionId": "1cffbbb1-625e-4448-a417-b32945e83ea0",
+  "versionCounter": 303,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-08-02T13:12:12.148Z",
+      "createdAt": "2026-08-02T13:12:12.148Z",
+      "role": "workflow:owner",
+      "workflowId": "chSXWYSK2S2unLgz",
+      "projectId": "CJEzaYFffDb6dVsb",
+      "project": {
+        "updatedAt": "2025-06-20T12:51:16.414Z",
+        "createdAt": "2025-06-20T12:40:37.511Z",
+        "id": "CJEzaYFffDb6dVsb",
+        "name": "林 韋銘 <andesnice@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "6449fe76-ff2b-4d48-bcd0-a5d0191edb1a"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-08-19T08:04:36.887Z",
+    "createdAt": "2026-08-19T07:59:51.244Z",
+    "versionId": "1cffbbb1-625e-4448-a417-b32945e83ea0",
+    "workflowId": "chSXWYSK2S2unLgz",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "## 一句話記帳設定\n\n1. LINE 回覆節點選擇 Header Auth credential：\n   - Header Name：Authorization\n   - Header Value：Bearer <LINE Channel Access Token>\n2. Notion 節點選擇正式 Notion credential。\n3. Notion DB 必須分享給 Integration。\n4. 啟用後，把 LINE Developers Webhook URL 改成：\n   https://XXXXX/webhook/line-accounting-submit\n5. 測試：記帳 昨天中油1350玉山卡\nNotion模板簡易分享:\nhttps://andesnice.notion.site/3bd8db83bd938041a9cfcb7105c0daff?source=copy_link\n此流程不讀取 Notion 歷史資料，只有確認後新增一筆。",
+          "height": 420,
+          "width": 520
+        },
+        "id": "9ccacba7-ecdf-43de-b779-39552e2cd5d6",
+        "name": "匯入後設定說明",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          0,
+          -16
+        ]
+      },
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "line-accounting-submit",
+          "options": {
+            "noResponseBody": true
+          }
+        },
+        "id": "52169314-54e6-4d4d-9817-cc29df1b39cc",
+        "name": "LINE 一句話記帳 Webhook",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          32,
+          432
+        ],
+        "webhookId": "1ca1ed50-a001-4ea1-8101-000000000102"
+      },
+      {
+        "parameters": {
+          "jsCode": "const body = $input.first().json.body || {};\nconst events = Array.isArray(body.events) ? body.events : [];\n\nreturn events\n  .filter(event => event?.type === 'message' && event?.message?.type === 'text')\n  .map(event => ({\n    json: {\n      userId: event.source?.userId || '',\n      replyToken: event.replyToken || '',\n      message: String(event.message.text || '').normalize('NFKC').trim(),\n      webhookEventId: event.webhookEventId || '',\n      isRedelivery: Boolean(event.deliveryContext?.isRedelivery),\n    },\n    pairedItem: { item: 0 },\n  }));"
+        },
+        "id": "1f6bfc26-f5ed-480f-959c-1b0fe5793fc2",
+        "name": "解析 LINE 事件",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          256,
+          432
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst store = staticData.oneLineAccounting ||= { pending: {}, lastPayment: {} };\nconst TTL_MS = 10 * 60 * 1000;\nconst now = Date.now();\n\nfor (const [key, value] of Object.entries(store.pending)) {\n  if (!value?.updatedAt || now - value.updatedAt > TTL_MS) delete store.pending[key];\n}\n\nconst categories = [\n  '食物', '服飾', '日常用品', '交通', '稅收', '手機費', '油錢', '停車費',\n  '休閒', '宮廟', '醫療', '玉山存錢', '卡費', '暫付', '罰單', '車',\n  '工具', '投資', '酒煙', '房貸', '訂閱',\n];\n\nconst payments = [\n  '現金', '街口支付', '富邦轉帳', 'Line', '玉山刷卡', '富邦付款',\n  '遠傳扣款', '台灣銀行扣款',\n];\n\nconst categoryGroups = {\n  '飲食': ['食物', '酒煙'],\n  '生活': ['服飾', '日常用品'],\n  '交通': ['交通', '油錢', '停車費', '罰單', '車'],\n  '帳單': ['稅收', '手機費', '卡費', '房貸', '訂閱'],\n  '健康': ['醫療'],\n  '休閒': ['休閒', '宮廟'],\n  '財務': ['玉山存錢', '暫付', '投資'],\n  '其他': ['工具'],\n};\n\nconst categoryKeywords = {\n  '食物': ['早餐', '午餐', '晚餐', '宵夜', '便當', '餐廳', '飲料', '咖啡', '吃飯', '食物'],\n  '服飾': ['衣服', '褲子', '鞋子', '服飾'],\n  '日常用品': ['日用品', '生活用品', '衛生紙', '洗衣精', '清潔用品', '日常用品'],\n  '交通': ['公車', '捷運', '火車', '高鐵', '計程車', 'uber', '交通'],\n  '稅收': ['繳稅', '稅金', '稅收'],\n  '手機費': ['手機費', '電話費', '電信費'],\n  '油錢': ['加油', '中油', '台塑', '油錢'],\n  '停車費': ['停車場', '停車費', '停車'],\n  '休閒': ['電影', '遊戲', '唱歌', '旅遊', '休閒'],\n  '宮廟': ['香油錢', '宮廟', '廟'],\n  '醫療': ['看醫生', '診所', '醫院', '藥局', '醫療'],\n  '玉山存錢': ['玉山存錢'],\n  '卡費': ['信用卡費', '繳卡費', '卡費'],\n  '暫付': ['代墊', '暫付'],\n  '罰單': ['罰單'],\n  '車': ['保養', '維修', '驗車', '洗車', '車'],\n  '工具': ['工具'],\n  '投資': ['股票', '基金', '投資'],\n  '酒煙': ['啤酒', '酒', '香煙', '煙'],\n  '房貸': ['房貸'],\n  '訂閱': ['netflix', 'spotify', 'youtube premium', '訂閱'],\n};\n\nconst paymentAliases = [\n  ['台灣銀行扣款', '台灣銀行扣款'], ['台銀扣款', '台灣銀行扣款'],\n  ['遠傳扣款', '遠傳扣款'], ['富邦轉帳', '富邦轉帳'], ['富邦付款', '富邦付款'],\n  ['玉山刷卡', '玉山刷卡'], ['玉山卡', '玉山刷卡'], ['刷玉山', '玉山刷卡'],\n  ['街口支付', '街口支付'], ['街口', '街口支付'],\n  ['line pay', 'Line'], ['linepay', 'Line'], ['line', 'Line'],\n  ['現金', '現金'], ['付現', '現金'],\n].sort((a, b) => b[0].length - a[0].length);\n\nfunction quickReply(text, actions = []) {\n  const message = { type: 'text', text };\n  if (actions.length) {\n    message.quickReply = {\n      items: actions.slice(0, 13).map(([label, value]) => ({\n        type: 'action',\n        action: { type: 'message', label, text: value },\n      })),\n    };\n  }\n  return [message];\n}\n\nfunction reply(base, text, actions = []) {\n  return { ...base, action: 'reply', messages: quickReply(text, actions) };\n}\n\nfunction twParts() {\n  const parts = new Intl.DateTimeFormat('en-US', {\n    timeZone: 'Asia/Taipei', year: 'numeric', month: '2-digit', day: '2-digit',\n  }).formatToParts(new Date());\n  return Object.fromEntries(parts.map(part => [part.type, part.value]));\n}\n\nfunction formatIso(year, month, day) {\n  const date = new Date(Date.UTC(year, month - 1, day));\n  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;\n  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;\n}\n\nfunction twDate(offset = 0) {\n  const parts = twParts();\n  const date = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + offset));\n  return date.toISOString().slice(0, 10);\n}\n\nfunction parseDate(text) {\n  let remaining = text;\n  let match = remaining.match(/\\b(20\\d{2})[-\\/.](\\d{1,2})[-\\/.](\\d{1,2})\\b/);\n  if (match) {\n    const date = formatIso(Number(match[1]), Number(match[2]), Number(match[3]));\n    if (date) return { date, remaining: remaining.replace(match[0], ' ') };\n  }\n\n  match = remaining.match(/(?:^|\\s)(\\d{1,2})[\\/.](\\d{1,2})(?:\\s|$)/);\n  if (!match) match = remaining.match(/(\\d{1,2})月(\\d{1,2})日/);\n  if (match) {\n    const year = Number(twParts().year);\n    const date = formatIso(year, Number(match[1]), Number(match[2]));\n    if (date) return { date, remaining: remaining.replace(match[0], ' ') };\n  }\n\n  for (const [word, offset] of [['前天', -2], ['昨天', -1], ['今天', 0]]) {\n    if (remaining.includes(word)) return { date: twDate(offset), remaining: remaining.replace(word, ' ') };\n  }\n  return { date: twDate(0), remaining };\n}\n\nfunction removeAt(text, index, length) {\n  return `${text.slice(0, index)} ${text.slice(index + length)}`;\n}\n\nfunction parsePayment(text) {\n  const lower = text.toLowerCase();\n  for (const [alias, payment] of paymentAliases) {\n    const index = lower.indexOf(alias.toLowerCase());\n    if (index >= 0) return { payment, remaining: removeAt(text, index, alias.length) };\n  }\n  return { payment: '', remaining: text };\n}\n\nfunction evaluateAmount(expression) {\n  const clean = expression.replace(/,/g, '').replace(/\\s/g, '');\n  if (!/^\\d+(?:\\.\\d+)?(?:[+-]\\d+(?:\\.\\d+)?)*$/.test(clean)) return null;\n  const tokens = clean.match(/[+-]?\\d+(?:\\.\\d+)?/g) || [];\n  const amount = tokens.reduce((sum, token) => sum + Number(token), 0);\n  return Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) / 100 : null;\n}\n\nfunction parseAmount(text) {\n  if (/\\d\\s*[+-]\\s*[+-]\\s*\\d/.test(text)) return { amount: null, remaining: text, invalid: true };\n  const matches = [...text.matchAll(/\\d[\\d,]*(?:\\.\\d+)?(?:\\s*[+-]\\s*\\d[\\d,]*(?:\\.\\d+)?)*/g)];\n  for (let index = matches.length - 1; index >= 0; index -= 1) {\n    const match = matches[index];\n    const amount = evaluateAmount(match[0]);\n    if (amount !== null) {\n      return { amount, remaining: removeAt(text, match.index, match[0].length), invalid: false };\n    }\n  }\n  return { amount: null, remaining: text, invalid: false };\n}\n\nfunction detectCategory(text) {\n  const lower = text.toLowerCase();\n  const candidates = [];\n  for (const [category, keywords] of Object.entries(categoryKeywords)) {\n    for (const keyword of keywords) candidates.push([keyword.toLowerCase(), category]);\n  }\n  candidates.sort((a, b) => b[0].length - a[0].length);\n  const found = candidates.find(([keyword]) => lower.includes(keyword));\n  return found?.[1] || '';\n}\n\nfunction categoryPrompt(base, pending, intro = '請選擇分類群組：') {\n  pending.waiting = 'category';\n  pending.updatedAt = Date.now();\n  store.pending[base.userId] = pending;\n  const actions = Object.keys(categoryGroups).map(group => [group, `分類群組:${group}`]);\n  actions.push(['❌ 取消', '取消記帳']);\n  return reply(base, intro, actions);\n}\n\nfunction paymentPrompt(base, pending, intro = '請選擇付款方式：') {\n  pending.waiting = 'payment';\n  pending.updatedAt = Date.now();\n  store.pending[base.userId] = pending;\n  const actions = payments.map(payment => [payment, `付款:${payment}`]);\n  actions.push(['❌ 取消', '取消記帳']);\n  return reply(base, intro, actions);\n}\n\nfunction amountPrompt(base, pending, intro = '請輸入金額，例如：120 或 100+50') {\n  pending.waiting = 'amount';\n  pending.updatedAt = Date.now();\n  store.pending[base.userId] = pending;\n  return reply(base, intro, [['❌ 取消', '取消記帳']]);\n}\n\nfunction confirmPrompt(base, pending) {\n  pending.waiting = 'confirm';\n  pending.updatedAt = Date.now();\n  store.pending[base.userId] = pending;\n  const amount = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 }).format(pending.amount);\n  const text = [\n    '📝 請確認記帳', '',\n    `📅 日期：${pending.date}`,\n    `📂 分類：${pending.category}`,\n    `💰 金額：NT$${amount}`,\n    `💳 付款：${pending.payment}`,\n    `✏️ 備註：${pending.note || '（無）'}`,\n  ].join('\\n');\n  return reply(base, text, [\n    ['✅ 確認', '確認記帳'], ['📂 改分類', '修改分類'], ['💰 改金額', '修改金額'],\n    ['💳 改付款', '修改付款'], ['❌ 取消', '取消記帳'],\n  ]);\n}\n\nfunction nextStep(base, pending) {\n  if (!pending.amount) return amountPrompt(base, pending);\n  if (!pending.category) return categoryPrompt(base, pending);\n  if (!pending.payment) return paymentPrompt(base, pending);\n  return confirmPrompt(base, pending);\n}\n\nfunction handle(input) {\n  const base = {\n    userId: input.userId || '',\n    replyToken: input.replyToken || '',\n    webhookEventId: input.webhookEventId || '',\n  };\n  const message = String(input.message || '').trim();\n  if (!base.userId || !base.replyToken || !message) return null;\n\n  let pending = store.pending[base.userId];\n\n  if (message === '取消記帳') {\n    delete store.pending[base.userId];\n    return reply(base, '已取消這筆記帳。');\n  }\n\n  if (message === '記帳' || message === '記帳說明') {\n    return reply(base, [\n      '請在「記帳」後輸入一整句，例如：',\n      '• 記帳 午餐120現金',\n      '• 記帳 昨天中油1350玉山卡',\n      '• 記帳 8/1 停車60 line',\n      '',\n      '日期可省略；付款方式省略時會沿用上次成功記帳的方式。',\n    ].join('\\n'));\n  }\n\n  if (message === '確認記帳') {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    if (pending.saving) return reply(base, '這筆資料正在寫入，請稍候，不需要重複確認。');\n    if (!pending.amount || !pending.category || !pending.payment) return nextStep(base, pending);\n    pending.saving = true;\n    pending.updatedAt = Date.now();\n    store.pending[base.userId] = pending;\n    return {\n      ...base,\n      action: 'save',\n      title: String(pending.note || pending.category).slice(0, 100),\n      note: String(pending.note || '').slice(0, 100),\n      category: pending.category,\n      amount: pending.amount,\n      payment: pending.payment,\n      date: pending.date,\n    };\n  }\n\n  if (message.startsWith('分類群組:')) {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    const group = message.slice('分類群組:'.length).trim();\n    const options = categoryGroups[group];\n    if (!options) return categoryPrompt(base, pending, '找不到這個群組，請重新選擇：');\n    const actions = options.map(category => [category, `類別:${category}`]);\n    actions.push(['❌ 取消', '取消記帳']);\n    return reply(base, `請選擇「${group}」的細分類：`, actions);\n  }\n\n  if (message.startsWith('類別:')) {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    const category = message.slice('類別:'.length).trim();\n    if (!categories.includes(category)) return categoryPrompt(base, pending, '分類不在允許清單，請重新選擇：');\n    pending.category = category;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\n  if (message.startsWith('付款:')) {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    const payment = message.slice('付款:'.length).trim();\n    if (!payments.includes(payment)) return paymentPrompt(base, pending, '付款方式不在允許清單，請重新選擇：');\n    pending.payment = payment;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\n  if (message === '修改分類') {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    return categoryPrompt(base, pending);\n  }\n  if (message === '修改付款') {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    return paymentPrompt(base, pending);\n  }\n  if (message === '修改金額') {\n    if (!pending) return reply(base, '這筆待確認資料已過期，請重新輸入「記帳 …」。');\n    return amountPrompt(base, pending);\n  }\n\n  if (pending?.waiting === 'amount') {\n    const parsed = parseAmount(message);\n    if (!parsed.amount || parsed.invalid) return amountPrompt(base, pending, '金額格式不正確，請輸入例如：120 或 100+50');\n    pending.amount = parsed.amount;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\n  if (pending?.waiting === 'category') {\n    const category = categories.includes(message) ? message : detectCategory(message);\n    if (!category) return categoryPrompt(base, pending, '無法辨識分類，請從群組選擇：');\n    pending.category = category;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\n  if (pending?.waiting === 'payment') {\n    const parsed = parsePayment(message);\n    if (!parsed.payment) return paymentPrompt(base, pending, '無法辨識付款方式，請重新選擇：');\n    pending.payment = parsed.payment;\n    pending.updatedAt = Date.now();\n    return nextStep(base, pending);\n  }\n\nconst content = message.startsWith('記帳')\n  ? message.slice(2).replace(/^[\\s:：]+/, '').trim()\n  : message;\n  if (!content) return reply(base, '請輸入完整內容，例如：記帳 午餐120現金');\n\n  const parsedDate = parseDate(content);\n  const parsedPayment = parsePayment(parsedDate.remaining);\n  const parsedAmount = parseAmount(parsedPayment.remaining);\n  const category = detectCategory(parsedAmount.remaining);\n  const note = parsedAmount.remaining\n    .replace(/[，,；;|]/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim()\n    .slice(0, 100);\n\n  pending = {\n    date: parsedDate.date,\n    category,\n    amount: parsedAmount.amount,\n    payment: parsedPayment.payment || store.lastPayment[base.userId] || '',\n    note,\n    updatedAt: Date.now(),\n    waiting: '',\n    saving: false,\n  };\n  store.pending[base.userId] = pending;\n\n  if (parsedAmount.invalid) return amountPrompt(base, pending, '金額格式不正確，請輸入例如：120 或 100+50');\n  return nextStep(base, pending);\n}\n\nconst output = [];\nfor (const [index, item] of $input.all().entries()) {\n  const result = handle(item.json);\n  if (result) output.push({ json: result, pairedItem: { item: index } });\n}\nreturn output;"
+        },
+        "id": "eaac949a-4a06-4514-be22-b2980db0a2da",
+        "name": "解析一句話與狀態",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          496,
+          432
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 3
+            },
+            "conditions": [
+              {
+                "id": "1ca1ed50-a001-4ea1-8101-000000000201",
+                "leftValue": "={{ $json.action }}",
+                "rightValue": "save",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "b1b87f6a-a0bd-4108-adb8-3e4782c88f75",
+        "name": "是否確認寫入",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.3,
+        "position": [
+          752,
+          432
+        ]
+      },
+      {
+        "parameters": {
+          "resource": "databasePage",
+          "databaseId": {
+            "__rl": true,
+            "value": "dbe28d3510e049428ae29c62045a9769",
+            "mode": "id"
+          },
+          "title": "={{ $json.title }}",
+          "simple": false,
+          "propertiesUi": {
+            "propertyValues": [
+              {
+                "key": "支出類型|select",
+                "selectValue": "={{ $json.category }}"
+              },
+              {
+                "key": "金額|number",
+                "numberValue": "={{ $json.amount }}"
+              },
+              {
+                "key": "Date|date",
+                "includeTime": false,
+                "date": "={{ $json.date }}",
+                "timezone": "Asia/Taipei"
+              },
+              {
+                "key": "付款方式|select",
+                "selectValue": "={{ $json.payment }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "f0b85d5a-669c-41f2-9f5d-67668a58732f",
+        "name": "新增 Notion 帳目",
+        "type": "n8n-nodes-base.notion",
+        "typeVersion": 2.2,
+        "position": [
+          1024,
+          304
+        ],
+        "credentials": {
+          "notionApi": {
+            "id": "GQXAagfHT864gK5q",
+            "name": "Notion account"
+          }
+        },
+        "onError": "continueErrorOutput"
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const original = $('解析一句話與狀態').item.json;\nconst staticData = $getWorkflowStaticData('global');\nconst store = staticData.oneLineAccounting ||= { pending: {}, lastPayment: {} };\ndelete store.pending[original.userId];\nstore.lastPayment[original.userId] = original.payment;\n\nconst amount = new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 2 }).format(original.amount);\nconst text = [\n  '✅ 記帳成功！', '',\n  `📅 ${original.date}`,\n  `📂 ${original.category}`,\n  `💰 NT$${amount}`,\n  `💳 ${original.payment}`,\n  `✏️ ${original.note || '（無備註）'}`,\n].join('\\n');\n\nreturn {\n  json: {\n    replyToken: original.replyToken,\n    messages: [{ type: 'text', text }],\n  },\n};"
+        },
+        "id": "ed9d3acf-7e61-4667-9bcf-df67bc235709",
+        "name": "清除待確認並組成功訊息",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1296,
+          240
+        ]
+      },
+      {
+        "parameters": {
+          "mode": "runOnceForEachItem",
+          "jsCode": "const original = $('解析一句話與狀態').item.json;\nconst staticData = $getWorkflowStaticData('global');\nconst store = staticData.oneLineAccounting ||= { pending: {}, lastPayment: {} };\nif (store.pending[original.userId]) {\n  store.pending[original.userId].saving = false;\n  store.pending[original.userId].updatedAt = Date.now();\n}\nreturn {\n  json: {\n    replyToken: original.replyToken,\n    messages: [{\n      type: 'text',\n      text: '⚠️ Notion 寫入失敗，待確認資料仍保留。請稍後按「重試」或取消。',\n      quickReply: {\n        items: [\n          { type: 'action', action: { type: 'message', label: '🔄 重試', text: '確認記帳' } },\n          { type: 'action', action: { type: 'message', label: '❌ 取消', text: '取消記帳' } },\n        ],\n      },\n    }],\n  },\n};"
+        },
+        "id": "f3d14bff-3751-4668-a4b0-444d4e577807",
+        "name": "組 Notion 失敗訊息",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1296,
+          368
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.line.me/v2/bot/message/reply",
+          "authentication": "predefinedCredentialType",
+          "nodeCredentialType": "lineMessagingApi",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ { replyToken: $json.replyToken, messages: $json.messages } }}",
+          "options": {}
+        },
+        "id": "d20dd919-96b6-4f7c-aa10-810ccf66b5a5",
+        "name": "LINE 回覆",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.3,
+        "position": [
+          1584,
+          464
+        ],
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "CnK2jCKERJJzgbyX",
+            "name": "Header Auth account"
+          },
+          "lineMessagingApi": {
+            "id": "ZyrigrYz6Z53vas8",
+            "name": "GAS社畜崙"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "LINE 一句話記帳 Webhook": {
+        "main": [
+          [
+            {
+              "node": "解析 LINE 事件",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "解析 LINE 事件": {
+        "main": [
+          [
+            {
+              "node": "解析一句話與狀態",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "解析一句話與狀態": {
+        "main": [
+          [
+            {
+              "node": "是否確認寫入",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "是否確認寫入": {
+        "main": [
+          [
+            {
+              "node": "新增 Notion 帳目",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "LINE 回覆",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "新增 Notion 帳目": {
+        "main": [
+          [
+            {
+              "node": "清除待確認並組成功訊息",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "組 Notion 失敗訊息",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "清除待確認並組成功訊息": {
+        "main": [
+          [
+            {
+              "node": "LINE 回覆",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "組 Notion 失敗訊息": {
+        "main": [
+          [
+            {
+              "node": "LINE 回覆",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "LINE 回覆": {
+        "main": [
+          []
+        ]
+      }
+    },
+    "authors": "林 韋銘",
+    "name": "Version 1cffbbb1",
+    "description": "",
+    "autosaved": true,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-08-19T08:04:36.886Z",
+        "id": 2062,
+        "workflowId": "chSXWYSK2S2unLgz",
+        "versionId": "1cffbbb1-625e-4448-a417-b32945e83ea0",
+        "event": "activated",
+        "userId": "6449fe76-ff2b-4d48-bcd0-a5d0191edb1a"
+      }
+    ]
+  }
+}

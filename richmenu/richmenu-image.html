@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>圖文選單底圖產生器 2500×843</title>
+<style>
+  body{margin:0;background:#2b2b2b;color:#eee;font-family:"Microsoft JhengHei","PingFang TC",sans-serif;text-align:center;padding:24px}
+  #preview{width:900px;height:303px;border:1px solid #555;margin:16px auto;display:block;box-shadow:0 6px 24px rgba(0,0,0,.5)}
+  button{font-size:18px;padding:12px 28px;border:0;border-radius:8px;background:#4A90D9;color:#fff;cursor:pointer;margin:8px}
+  button:hover{background:#3a7bc0}
+  p{color:#aaa;font-size:14px;line-height:1.7}
+  select{font-size:15px;padding:8px;border-radius:6px}
+</style>
+</head>
+<body>
+  <h2>LINE 圖文選單底圖 · 2500 × 843</h2>
+  <p>
+    配色：
+    <select id="theme">
+      <option value="warm">暖色 · 米金</option>
+      <option value="ocean">藍綠 · 清爽</option>
+      <option value="dark">深色 · 質感</option>
+    </select>
+    &nbsp;（切換後會即時重繪）
+  </p>
+  <canvas id="cv" width="2500" height="843" style="display:none"></canvas>
+  <img id="preview" alt="預覽">
+  <div>
+    <button onclick="download()">⬇️ 下載 PNG（上傳 LINE 用這張）</button>
+  </div>
+  <p>
+    兩格由左到右對應圖文選單的 A / B。<br>
+    A＝自我介紹（連結開 Notion）　B＝記帳（無痕觸發）
+  </p>
+
+<script>
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const W = 2500, H = 843;
+
+const THEMES = {
+  warm:  { bg:['#FDF6EC','#F6E7C9'], cellLine:'#E3CfA0', accent:'#B5843B', icon:'#C89A4A', label:'#5A4423' },
+  ocean: { bg:['#EAF6F6','#D2ECEC'], cellLine:'#A9D6D6', accent:'#2E8B8B', icon:'#3AA0A0', label:'#1F5555' },
+  dark:  { bg:['#2E3440','#3B4252'], cellLine:'#4C566A', accent:'#88C0D0', icon:'#8FBCBB', label:'#ECEFF4' },
+};
+
+const CELLS = [
+  { emoji:'👋', label:'自我介紹' },
+  { emoji:'💰', label:'記帳' },
+];
+const COL = W / CELLS.length;
+
+function draw(){
+  const t = THEMES[document.getElementById('theme').value];
+
+  // 背景漸層
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0, t.bg[0]);
+  g.addColorStop(1, t.bg[1]);
+  ctx.fillStyle = g;
+  ctx.fillRect(0,0,W,H);
+
+  // 三格
+  CELLS.forEach((c,i)=>{
+    const cx = COL*i + COL/2;
+
+    // 分隔線
+    if(i>0){
+      ctx.strokeStyle = t.cellLine;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(COL*i, 120);
+      ctx.lineTo(COL*i, H-120);
+      ctx.stroke();
+    }
+
+    // icon 圓底
+    ctx.beginPath();
+    ctx.arc(cx, 320, 130, 0, Math.PI*2);
+    ctx.fillStyle = t.accent + '22';
+    ctx.fill();
+
+    // emoji
+    ctx.font = '150px "Segoe UI Emoji","Apple Color Emoji",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(c.emoji, cx, 320);
+
+    // 文字
+    ctx.fillStyle = t.label;
+    ctx.font = 'bold 92px "Microsoft JhengHei","PingFang TC",sans-serif';
+    ctx.fillText(c.label, cx, 560);
+
+    // 底部小圓點裝飾
+    ctx.beginPath();
+    ctx.arc(cx, 680, 10, 0, Math.PI*2);
+    ctx.fillStyle = t.accent;
+    ctx.fill();
+  });
+
+  document.getElementById('preview').src = cv.toDataURL('image/png');
+}
+
+function download(){
+  const a = document.createElement('a');
+  a.download = 'line-richmenu-2500x843.png';
+  a.href = cv.toDataURL('image/png');
+  a.click();
+}
+
+document.getElementById('theme').addEventListener('change', draw);
+draw();
+</script>
+</body>
+</html>

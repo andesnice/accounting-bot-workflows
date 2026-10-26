@@ -1,0 +1,425 @@
+{
+  "name": "2.LIFF記帳API-白名單版",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "accounting-liff-api",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f8d7c9d2-a1d2-4a4f-976c-0793dd644c07",
+      "name": "記帳 LIFF Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1248, 0],
+      "webhookId": "3a64c02a-b31b-4a59-a539-d02601098021"
+    },
+    {
+      "parameters": {
+        "jsCode": "let body = $json.body;\nif (typeof body === 'string') {\n  try { body = JSON.parse(body); } catch { body = {}; }\n}\nbody = body && typeof body === 'object' ? body : {};\nconst amount = Number(body.amount);\nconst allowedCategories = ['食物','服飾','日常用品','交通','稅收','手機費','油錢','停車費','休閒','宮廟','醫療','玉山存錢','卡費','暫付','罰單','車','工具','投資','酒煙','房貸','訂閱'];\nconst allowedPayments = ['街口支付','富邦轉帳','Line','現金','玉山刷卡','富邦付款','遠傳扣款','台灣銀行扣款'];\n\nreturn [{ json: {\n  action: String(body.action || '').trim(),\n  accessToken: String(body.accessToken || '').trim(),\n  pageId: String(body.pageId || '').replace(/[^a-zA-Z0-9-]/g, ''),\n  title: String(body.title || '').trim().slice(0, 100),\n  category: allowedCategories.includes(body.category) ? body.category : '',\n  payment: allowedPayments.includes(body.payment) ? body.payment : '',\n  amount: Number.isFinite(amount) ? amount : 0,\n  date: String(body.date || '').trim()\n} }];"
+      },
+      "id": "d99f8d1d-5f89-4d53-923c-b22d00d73717",
+      "name": "解析記帳請求",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1040, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://api.line.me/v2/profile",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $json.accessToken }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "bc6dd0ed-f344-40b2-afc8-8f08651abcc7",
+      "name": "向 LINE 驗證記帳者",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [-816, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $('解析記帳請求').item.json;\nconst lineProfile = $json || {};\n\n// 開放版：任何通過 LINE 登入（取得 userId）的使用者都可記帳，不再比對白名單。\nconst allowedActions = ['list', 'create', 'delete'];\nconst validAction = allowedActions.includes(request.action);\nconst validPayload = request.action === 'create'\n  ? Boolean(request.title && request.category && request.payment && request.amount > 0 && /^\\d{4}-\\d{2}-\\d{2}$/.test(request.date))\n  : request.action === 'list'\n    ? true\n    : Boolean(request.pageId);\nconst authorized = Boolean(lineProfile.userId) && validAction && validPayload;\n\nlet message = '';\nif (!lineProfile.userId) message = 'LINE 登入已失效，請關閉後重新開啟。';\nelse if (!validAction || !validPayload) message = '記帳內容不完整。';\n\nreturn [{ json: {\n  ...request,\n  authorized,\n  message,\n  userId: lineProfile.userId || '',\n  displayName: lineProfile.displayName || ''\n} }];"
+      },
+      "id": "071f91bd-8bd8-4aa6-a532-aa1979f7b62e",
+      "name": "記帳白名單授權",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-592, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b2ddc192-cd23-4e6f-bca7-900f0510224d",
+              "leftValue": "={{ $json.authorized }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3d128484-b32e-4ddd-aee4-f9e99e62e2c8",
+      "name": "是否允許記帳",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [-368, 0]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a335ecf2-9c1e-4a96-a947-21f629c52bb7",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "list",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "list"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "ed303d76-7a89-4508-83ab-6090755a2e6f",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "create",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "08417a83-142a-46f8-8d06-34c5d0692a6d",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "delete"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e78e57ef-a14c-48d1-a78e-48b5b4b48fb4",
+      "name": "分流記帳動作",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [-128, -112]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "databaseId": {
+          "__rl": true,
+          "value": "dbe28d3510e049428ae29c62045a9769",
+          "mode": "id"
+        },
+        "returnAll": false,
+        "limit": 100,
+        "simple": false,
+        "filterType": "none",
+        "options": {
+          "sort": {
+            "sortValue": [
+              {
+                "key": "Date|date",
+                "direction": "descending"
+              }
+            ]
+          }
+        }
+      },
+      "id": "caa75052-b6ad-44b0-8554-2d4fa42a699a",
+      "name": "讀取 Notion 帳目",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [144, -320],
+      "alwaysOutputData": true,
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const pages = $input.all().map(item => item.json).filter(page => page?.id && page?.properties);\nconst transactions = pages.map(page => {\n  const props = page.properties;\n  let title = '未命名支出';\n  for (const value of Object.values(props)) {\n    if (value?.type === 'title') {\n      title = value.title?.[0]?.plain_text || '未命名支出';\n      break;\n    }\n  }\n  return {\n    id: page.id,\n    title,\n    category: props['支出類型']?.select?.name || '未分類',\n    amount: Number(props['金額']?.number || 0),\n    date: props['Date']?.date?.start?.slice(0, 10) || '',\n    payment: props['付款方式']?.select?.name || '未設定',\n    url: page.url || ''\n  };\n}).filter(item => item.date && item.amount > 0);\ntransactions.sort((a, b) => b.date.localeCompare(a.date));\nreturn [{ json: { ok: true, transactions } }];"
+      },
+      "id": "82038054-f945-4699-8e42-40817d46ce99",
+      "name": "整理 LIFF 帳目",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, -320]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "databaseId": {
+          "__rl": true,
+          "value": "dbe28d3510e049428ae29c62045a9769",
+          "mode": "id"
+        },
+        "title": "={{ $json.title }}",
+        "simple": false,
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "支出類型|select",
+              "selectValue": "={{ $json.category }}"
+            },
+            {
+              "key": "金額|number",
+              "numberValue": "={{ $json.amount }}"
+            },
+            {
+              "key": "Date|date",
+              "includeTime": false,
+              "date": "={{ $json.date }}",
+              "timezone": "Asia/Taipei"
+            },
+            {
+              "key": "付款方式|select",
+              "selectValue": "={{ $json.payment }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dfd15248-34bc-4b46-8168-8a9b10e756af",
+      "name": "新增 Notion 帳目",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [144, -80],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://api.notion.com/v1/pages/{{ $json.pageId }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "notionApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Notion-Version",
+              "value": "2022-06-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { archived: true } }}",
+        "options": {}
+      },
+      "id": "18e49dae-42a0-489b-a93b-8a1872fe34d2",
+      "name": "封存 Notion 帳目",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [144, 176],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: true } }];"
+      },
+      "id": "c95ec554-750c-4b57-acbb-0654f7652e1d",
+      "name": "記帳寫入成功",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [416, 48]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: false, statusCode: 403, message: $json.message || '沒有記帳權限。' } }];"
+      },
+      "id": "702b332b-92d0-4c1d-862e-f37651bf9e1b",
+      "name": "拒絕記帳請求",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-128, 208]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ok: false, statusCode: 500, message: 'Notion 記帳失敗，請稍後再試。' } }];"
+      },
+      "id": "dbf49955-c5ea-4918-b960-fd20f42447d6",
+      "name": "記帳寫入失敗",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [416, 272]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode || 200 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              }
+            ]
+          }
+        }
+      },
+      "id": "7d31f13c-aae9-422b-ae54-f73cb44ceba7",
+      "name": "回傳記帳 JSON",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [688, 0]
+    },
+    {
+      "parameters": {
+        "content": "## 匯入後設定\\n\\n1. 在「讀取 Notion 帳目」選擇可存取記帳資料庫的 Notion 憑證。\\n2. 在「新增 Notion 帳目」選擇相同憑證。\\n3. 在「封存 Notion 帳目」選擇相同憑證。\\n4. 確認資料庫已分享給該 Notion Integration。\\n5. 啟用 Workflow。\\n\\n開放版：任何通過 LINE 登入的使用者都可記帳。\\n⚠️ 所有人共用同一個 Notion 帳目 DB，彼此看得到／可刪對方的紀錄。",
+        "height": 288,
+        "width": 560
+      },
+      "id": "4f4acd3e-6a37-455b-a3ae-06bd184f3b5b",
+      "name": "LIFF 記帳設定說明",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-1248, -352]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "記帳 LIFF Webhook": {
+      "main": [[{"node": "解析記帳請求", "type": "main", "index": 0}]]
+    },
+    "解析記帳請求": {
+      "main": [[{"node": "向 LINE 驗證記帳者", "type": "main", "index": 0}]]
+    },
+    "向 LINE 驗證記帳者": {
+      "main": [[{"node": "記帳白名單授權", "type": "main", "index": 0}]]
+    },
+    "記帳白名單授權": {
+      "main": [[{"node": "是否允許記帳", "type": "main", "index": 0}]]
+    },
+    "是否允許記帳": {
+      "main": [
+        [{"node": "分流記帳動作", "type": "main", "index": 0}],
+        [{"node": "拒絕記帳請求", "type": "main", "index": 0}]
+      ]
+    },
+    "分流記帳動作": {
+      "main": [
+        [{"node": "讀取 Notion 帳目", "type": "main", "index": 0}],
+        [{"node": "新增 Notion 帳目", "type": "main", "index": 0}],
+        [{"node": "封存 Notion 帳目", "type": "main", "index": 0}]
+      ]
+    },
+    "讀取 Notion 帳目": {
+      "main": [[{"node": "整理 LIFF 帳目", "type": "main", "index": 0}]]
+    },
+    "整理 LIFF 帳目": {
+      "main": [[{"node": "回傳記帳 JSON", "type": "main", "index": 0}]]
+    },
+    "新增 Notion 帳目": {
+      "main": [
+        [{"node": "記帳寫入成功", "type": "main", "index": 0}],
+        [{"node": "記帳寫入失敗", "type": "main", "index": 0}]
+      ]
+    },
+    "封存 Notion 帳目": {
+      "main": [
+        [{"node": "記帳寫入成功", "type": "main", "index": 0}],
+        [{"node": "記帳寫入失敗", "type": "main", "index": 0}]
+      ]
+    },
+    "記帳寫入成功": {
+      "main": [[{"node": "回傳記帳 JSON", "type": "main", "index": 0}]]
+    },
+    "拒絕記帳請求": {
+      "main": [[{"node": "回傳記帳 JSON", "type": "main", "index": 0}]]
+    },
+    "記帳寫入失敗": {
+      "main": [[{"node": "回傳記帳 JSON", "type": "main", "index": 0}]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "27d52b6a-d5ba-459b-b36c-b641c0ab47ee",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": []
+}
